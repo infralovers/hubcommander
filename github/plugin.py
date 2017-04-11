@@ -483,7 +483,7 @@ class GitHubPlugin(BotCommander):
         """
         Creates a new repository (default is private unless the org is public only).
 
-        Command is as follows: !createrepo <newrepo> <organization>
+        Command is as follows: !createrepo <newrepo> <organization> <team> <permissions>
         :param data:
         :return:
         """
@@ -491,6 +491,8 @@ class GitHubPlugin(BotCommander):
             parser = argparse.ArgumentParser()
             parser.add_argument('new_repo', type=str)
             parser.add_argument('org', type=str)
+            parser.add_argument('team', type=str)
+            parser.add_argument('permissions', type=str)
 
             args, unknown = parser.parse_known_args(args=preformat_args(data["text"]))
             if len(unknown) > 0:
@@ -503,6 +505,9 @@ class GitHubPlugin(BotCommander):
             # Check that we can use this org:
             real_org = self.org_lookup[args["org"]][0]
 
+            team_to_add_repo_to = args["team"]
+            team_permissions = args["permissions"]
+
         except KeyError as _:
             send_error(data["channel"], '@{}: Invalid orgname sent in.  Run `!ListOrgs` to see the valid orgs.'
                        .format(user_data["name"]), markdown=True)
@@ -510,7 +515,7 @@ class GitHubPlugin(BotCommander):
 
         except SystemExit as _:
             send_info(data["channel"], "@{}: `!CreateRepo` usage is:\n```!CreateRepo <NewRepoName> "
-                                       "<GitHubOrgAliasToPutTheRepoInToHere>```\nNo special characters or spaces in the "
+                                       "<GitHubOrgAliasToPutTheRepoInToHere> <TeamToPutRepoIn> <RoleEitherPull,PushOrAdmin>```\nNo special characters or spaces in the "
                                        "variables.  Run `!ListOrgs` to see the list of GitHub Organizations that I manage. "
                                        "This will first check for the presence of the repo in the org before creating it."
                       .format(user_data["name"]), markdown=True)
@@ -540,6 +545,14 @@ class GitHubPlugin(BotCommander):
 
             return
 
+        # Check if team exists:
+        if team_to_add_repo_to:
+            team_id = self.find_team_id_by_name(real_org, team_to_add_repo_to)
+
+            if not (team_id):
+                send_error(data["channel"], "The GitHub team does not exist.")
+                return
+
         # Great!! Create the repository:
         try:
             visibility = True if not ORGS[real_org]["public_only"] else False
@@ -551,13 +564,17 @@ class GitHubPlugin(BotCommander):
 
         # Grant the proper teams access to the repository:
         try:
-            for perm_dict in ORGS[real_org]["new_repo_teams"]:
-                self.set_repo_permissions(repo_to_add, real_org, perm_dict["id"], perm_dict["perm"])
+            if team_id:
+                self.set_repo_permissions(repo_to_add, real_org, team_id, team_permissions)
+
+            else:
+                for perm_dict in ORGS[real_org]["new_repo_teams"]:
+                    self.set_repo_permissions(repo_to_add, real_org, perm_dict["id"], perm_dict["perm"])
 
         except Exception as e:
             send_error(data["channel"],
-                       "@{}: I encountered a problem setting repo permissions for team {team}: \n\n{exc}".format(
-                           user_data["name"], team=perm_dict["name"], exc=e))
+                       "@{}: I encountered a problem setting repo permissions for desired team: \n\n{exc}".format(
+                        user_data["name"], exc=e))
             return
 
         # All done!
